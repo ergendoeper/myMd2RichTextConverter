@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Content Security Policy: Verhindert externe Injektionen & Inline-Event-Handler -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self';">
+  <title>Markdown & Jira-Wiki zu Rich-Text Konverter</title>
+  <style>
+    :root {
+      --bg-color: #f8fafc;
+      --panel-bg: #ffffff;
+      --border-color: #cbd5e1;
+      --primary: #0284c7;
+      --primary-hover: #0369a1;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --radius: 8px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg-color);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    header {
+      background: #0f172a;
+      color: #fff;
+      padding: 0.75rem 1.5rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 2px solid var(--primary);
+    }
+
+    header h1 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .badge {
+      background: #166534;
+      color: #dcfce7;
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .actions {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    button {
+      background: var(--primary);
+      color: #ffffff;
+      border: none;
+      padding: 0.5rem 1rem;
+      border-radius: var(--radius);
+      font-weight: 500;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      transition: background 0.15s ease-in-out;
+    }
+
+    button:hover {
+      background: var(--primary-hover);
+    }
+
+    button.secondary {
+      background: #334155;
+    }
+
+    button.secondary:hover {
+      background: #475569;
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      padding: 1rem;
+      flex: 1;
+      height: calc(100vh - 65px);
+    }
+
+    .pane {
+      background: var(--panel-bg);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+
+    .pane-header {
+      background: #f1f5f9;
+      padding: 0.5rem 1rem;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    textarea {
+      flex: 1;
+      width: 100%;
+      border: none;
+      resize: none;
+      padding: 1rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 0.85rem;
+      line-height: 1.5;
+      color: var(--text);
+      outline: none;
+    }
+
+    .preview-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1.5rem;
+      background: #ffffff;
+      line-height: 1.6;
+    }
+
+    /* Formatierungs-Styling für den erzeugten Rich-Text */
+    .preview-container h1 { font-size: 1.6rem; margin-bottom: 1rem; border-bottom: 2px solid #e2e8f0; padding-bottom: 0.4rem; }
+    .preview-container h2 { font-size: 1.3rem; margin-top: 1.5rem; margin-bottom: 0.75rem; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.2rem; }
+    .preview-container h3 { font-size: 1.1rem; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+    .preview-container p { margin-bottom: 0.75rem; }
+    .preview-container hr { border: none; border-top: 1px solid #cbd5e1; margin: 1.5rem 0; }
+    
+    .preview-container blockquote {
+      border-left: 4px solid var(--primary);
+      background: #f0f9ff;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1rem;
+      color: #334155;
+      border-radius: 0 4px 4px 0;
+    }
+
+    .preview-container table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0 1.5rem 0;
+      font-size: 0.85rem;
+    }
+
+    .preview-container th, 
+    .preview-container td {
+      border: 1px solid #cbd5e1;
+      padding: 6px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .preview-container th {
+      background-color: #f8fafc;
+      font-weight: 600;
+      color: #1e293b;
+    }
+
+    .preview-container tr:nth-child(even) td {
+      background-color: #fcfdfe;
+    }
+
+    .preview-container ul {
+      margin-left: 1.5rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .preview-container li {
+      margin-bottom: 0.25rem;
+    }
+
+    .preview-container a {
+      color: var(--primary);
+      text-decoration: underline;
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      background: #0f172a;
+      color: #fff;
+      padding: 0.75rem 1.25rem;
+      border-radius: var(--radius);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      font-size: 0.9rem;
+      display: none;
+      animation: fadeIn 0.2s ease-in-out;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>
+      <span>📝 Secure MD & Jira-Wiki to Rich-Text</span>
+      <span class="badge">Client-Side Sanitized</span>
+    </h1>
+    <div class="actions">
+      <button class="secondary" id="btn-load-template">Template laden</button>
+      <button id="btn-copy">📋 Rich-Text kopieren</button>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <section class="pane">
+      <div class="pane-header">
+        <span>INPUT (Markdown / Jira-Wiki Markup)</span>
+        <span id="input-stats">0 Zeichen</span>
+      </div>
+      <textarea id="raw-input" spellcheck="false" placeholder="Hier Markdown oder Jira-Markup einfügen..."></textarea>
+    </section>
+
+    <section class="pane">
+      <div class="pane-header">
+        <span>VORSCHAU / RICH-TEXT OUTPUT</span>
+        <span>HTML5 Clipboard Ready</span>
+      </div>
+      <div class="preview-container" id="preview-output"></div>
+    </section>
+  </main>
+
+  <div class="toast" id="toast">Formatierter Rich-Text in die Zwischenablage kopiert!</div>
+
+  <script>
+    /**
+     * Sichere Parsing-Engine:
+     * Unterstützt Confluence Jira-Tabellensyntax (|| Header || und | Cell |),
+     * Links ([Text|URL] und [URL]), Task-Listen, Blockquotes und Headers.
+     */
+    class SecureDocConverter {
+      // 1. Sicheres Escapen aller HTML-Entities zur Unterbindung von Injections
+      static escapeHtml(str) {
+        return str
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#039;");
+      }
+
+      // 2. Striktes Whitelisting von URL-Schemata
+      static sanitizeUrl(url) {
+        const clean = url.trim();
+        if (/^(https?:|mailto:)/i.test(clean)) {
+          return this.escapeHtml(clean);
+        }
+        return "#"; // Fallback bei gefährlichen Protokollen (z.B. javascript:)
+      }
+
+      // 3. Inline-Formatierungen parsen
+      static parseInline(text) {
+        // Links: [Label|URL] oder [Label]
+        text = text.replace(/\[([^\Vert{}\]]+)\|([^\]]+)\]/g, (match, label, url) => {
+          const safeUrl = this.sanitizeUrl(url);
+          return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${this.escapeHtml(label)}</a>`;
+        });
+        text = text.replace(/\[([^\]]+)\]/g, (match, content) => {
+          // Check ob es sich um eine URL handelt
+          if (/^https?:\/\//i.test(content)) {
+            const safeUrl = this.sanitizeUrl(content);
+            return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeUrl}</a>`;
+          }
+          return `[${this.escapeHtml(content)}]`;
+        });
+
+        // Bold
+        text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        // Italic (Markdown und Jira-Syntax //text//)
+        text = text.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+        text = text.replace(/\/\/([^/]+)\/\//g, '<em>$1</em>');
+
+        return text;
+      }
+
+      // 4. Haupt-Parser
+      static convert(rawText) {
+        const lines = rawText.split(/\r?\n/);
+        let html = [];
+        let inTable = false;
+        let inList = false;
+        let inQuote = false;
+
+        const closeBlocks = () => {
+          if (inTable) { html.push('</tbody></table>'); inTable = false; }
+          if (inList) { html.push('</ul>'); inList = false; }
+          if (inQuote) { html.push('</blockquote>'); inQuote = false; }
+        };
+
+        for (let i = 0; i < lines.length; i++) {
+          let line = lines[i].trim();
+
+          // Leere Zeile
+          if (!line) {
+            closeBlocks();
+            continue;
+          }
+
+          // Trennlinie
+          if (/^---$\vert{}^\*\*\*$/.test(line)) {
+            closeBlocks();
+            html.push('<hr>');
+            continue;
+          }
+
+          // Headings (#, ##, ###)
+          const headingMatch = line.match(/^(#{1,6})\s+(.*)$/);
+          if (headingMatch) {
+            closeBlocks();
+            const level = headingMatch[1].length;
+            const content = this.parseInline(this.escapeHtml(headingMatch[2]));
+            html.push(`<h${level}>${content}</h${level}>`);
+            continue;
+          }
+
+          // Blockquote (>)
+          if (line.startsWith('>')) {
+            if (inTable || inList) closeBlocks();
+            if (!inQuote) {
+              html.push('<blockquote>');
+              inQuote = true;
+            }
+            const cleanLine = line.replace(/^>\s?/, '');
+            html.push(`<p>${this.parseInline(this.escapeHtml(cleanLine))}</p>`);
+            continue;
+          } else if (inQuote) {
+            html.push('</blockquote>');
+            inQuote = false;
+          }
+
+          // Listen / Checklisten
+          const listMatch = line.match(/^-\s+(\[\s*\]|[x])?\s*(.*)$/i);
+          if (listMatch) {
+            if (inTable || inQuote) closeBlocks();
+            if (!inList) {
+              html.push('<ul>');
+              inList = true;
+            }
+            let checkPrefix = '';
+            if (listMatch[1]) {
+              const isChecked = listMatch[1].toLowerCase().includes('x');
+              checkPrefix = isChecked ? '☑ ' : '☐ ';
+            }
+            const content = this.parseInline(this.escapeHtml(listMatch[2]));
+            html.push(`<li>${checkPrefix}${content}</li>`);
+            continue;
+          } else if (inList) {
+            html.push('</ul>');
+            inList = false;
+          }
+
+          // Tabellen: Unterstützt Jira-Markup (|| Header || und | Zelle |)
+          if (line.startsWith('|')) {
+            if (inQuote || inList) closeBlocks();
+
+            const isHeaderRow = line.startsWith('||');
+            if (!inTable) {
+              html.push('<table><tbody>');
+              inTable = true;
+            }
+
+            // Zellen splitten unter Berücksichtigung von || oder |
+            let cells = [];
+            if (isHeaderRow) {
+              cells = line.split('||').map(c => c.trim()).filter((c, idx, arr) => idx > 0 && idx < arr.length);
+            } else {
+              cells = line.split('|').map(c => c.trim()).filter((c, idx, arr) => idx > 0 && idx < arr.length);
+            }
+
+            // Ignoriere Markdown-Separator-Zeilen wie |--|--|
+            if (cells.length > 0 && cells.every(c => /^:?-+:?$/.test(c))) {
+              continue;
+            }
+
+            html.push('<tr>');
+            cells.forEach(cell => {
+              const parsed = this.parseInline(this.escapeHtml(cell));
+              if (isHeaderRow) {
+                html.push(`<th>${parsed}</th>`);
+              } else {
+                html.push(`<td>${parsed}</td>`);
+              }
+            });
+            html.push('</tr>');
+            continue;
+          } else if (inTable) {
+            html.push('</tbody></table>');
+            inTable = false;
+          }
+
+          // Standard Paragraphen
+          const textContent = this.parseInline(this.escapeHtml(line));
+          html.push(`<p>${textContent}</p>`);
+        }
+
+        closeBlocks();
+        return html.join('\n');
+      }
+    }
+
+    // Template Definition
+    const TEMPLATE_TEXT = `# 🎯 Betriebsübernahme – Detail: [SYSTEMNAME] – [JIRA-KEY]
+
+> **JIRA-Request:** [JIRA-XXXX|https://jira.admin.ch/browse/JIRA-XXXX]  
+> **Status:** 🟢 Geplant | 🟡 In Prüfung | 🔴 Abgelehnt | ✅ Übernommen | ⏸ Aufgeschoben  
+> **Verantwortlich:** [Name]  
+> **Erstellt:** //Datum//
+
+---
+
+## 1. Stammdaten & Kontext
+
+|| Feld || Inhalt ||
+| System / Anwendung | [Name] |
+| JIRA-Request | [JIRA-XXXX|https://jira.admin.ch/browse/JIRA-XXXX] |
+| Anfragende Stelle | [Fachbereich] |
+| Ansprechperson Business | [Name, E-Mail, Telefon] |
+| Ansprechperson IT | [Name, E-Mail, Telefon] |
+| Aktueller Betreiber | [Team / Extern / Keiner] |
+| Geplanter Übernahme-Termin | [Datum] |
+| Status | [Dropdown: Geplant / In Prüfung / Abgelehnt / Übernommen / Aufgeschoben] |
+| Priorität | Hoch / Mittel / Niedrig |
+
+---
+
+## 2. Beschreibung der Anfrage
+
+**Ausgangslage:**  
+[Text]
+
+**Umfang der Übernahme:**  
+- [ ] Gesamter Betrieb  
+- [ ] Teilbetrieb (Applikation / Infrastruktur / 2nd/3rd Level)  
+- [ ] Neuentwicklung (ab Go-Live)  
+- [ ] Migration
+
+**Kritische Abhängigkeiten:**  
+- Schnittstellen: [Liste]  
+- Regulatorik: [DSG, FinMG, etc.]  
+- SLA: [Verfügbarkeit, Reaktionszeiten]
+
+---
+
+## 3. Betriebsaufgaben – Checkliste & FTE
+
+*(Kopieren Sie die Tabelle aus der Hauptseite, füllen Sie „Aufwand (PT/Jahr)“, „Verantwortung“, „Status“ aus. Nicht zutreffende Zeilen → N/A + Begründung.)*
+
+|| # || Betriebsaufgabe || Kategorie || Bundesvorgabe || Häufigkeit || Aufwand PT/Jahr (Intern) || Aufwand PT/Jahr (Extern) || Verantwortung || Tool / Artefakt || Status ||
+| 1 | Patch- & Vulnerability-Management | Sicherheit | SSV, BSI-GS SYS.1.2 | Monatlich/Ad-hoc | | | Intern | WSUS/SCCM/Ansible/JIRA | ☐ |
+| 2 | Sicherheitsprüfungen & Audits | Sicherheit | SSV, ISDS, BSI-GS ORP.4 | Jährlich/Quartalsweise | | | Intern+Extern | Nessus/OpenVAS/ISDS-Tool | ☐ |
+| 3 | Betriebshandbuch (Runbook) à jour halten | Dokumentation | SSV-Betriebsvorgaben | Quartalsweise | | | Intern | Confluence/Git | ☐ |
+| 4 | Lieferanten-Management | Governance | FinV, BöB | Monatlich/Jährlich | | | Intern | Ariba/Vertragsregister | ☐ |
+| 5 | Backup & Restore-Tests | Verfügbarkeit | SSV, BSI-GS DER.2 | Täglich/Wöch/Jährlich | | | Intern | Veeam/Commvault/Scripts | ☐ |
+| 6 | Monitoring & Alerting | Betrieb | SSV, BSI-GS OPS.1 | Kontinuierlich | | | Intern | ICINGA/Prometheus/Grafana | ☐ |
+| 7 | Incident & Problem Management | Betrieb | SSV, ITIL | Ad-hoc | | | Intern+Extern | JIRA SM | ☐ |
+| 8 | Change Management | Betrieb | SSV, ITIL | Pro Change | | | Intern | JIRA/Confluence | ☐ |
+| 9 | Capacity & Performance Management | Betrieb | SSV, BSI-GS SYS.1.3 | Monatlich/Pro Release | | | Intern | APM/CloudWatch/Dynatrace | ☐ |
+| 10 | Zugriffsmanagement & IAM | Sicherheit | SSV, BSI-GS IDS.1 | Ad-hoc/Quartalsweise | | | Intern | IAM/AD/PAM | ☐ |
+| 11 | Lizenzmanagement & Compliance (SAM) | Finanzen/Governance | FinV, SAM-Standard | Jährlich/Quartalsweise | | | Intern | SAM-Tool/Flexera/Snow | ☐ |
+| 12 | Datenschutz & DSG-Compliance | Recht/Sicherheit | DSG Art. 22, EDÖB | Jährlich/Ad-hoc | | | Intern+DSB | OneTrust/Confluence | ☐ |
+| 13 | Notfallvorsorge & BCP/DR | Verfügbarkeit | SSV, BSI-GS CON.1 | Jährlich | | | Intern+Extern | DR-Plan/Confluence | ☐ |
+| 14 | Sicherheitshärtung & Compliance-Checks | Sicherheit | SSV, CIS Benchmarks | Quartalsweise | | | Intern | OpenSCAP/Ansible | ☐ |
+| 15 | Log-Management & SIEM | Sicherheit | SSV, BSI-GS LOG.1 | Kontinuierlich | | | Intern | Splunk/ELK/Azure Sentinel | ☐ |
+| 16 | Kostencontrolling & FinOps | Finanzen | FinV, FinOps-Practice | Monatlich | | | Intern | Cloudability/FinOps-Tool | ☐ |
+| 17 | Release- & Deployment-Management | Betrieb | SSV, ITIL | Pro Release | | | Intern | GitLab CI/Jenkins/ArgoCD | ☐ |
+| 18 | Wissensmanagement & Onboarding | Organisation | SSV, Personalvorgaben | Quartalsweise | | | Intern | Confluence/Learning-Platform | ☐ |
+
+**Total FTE (Betrieb):** Intern: 0.0 | Extern: 0.0 | **Summe: 0.0 FTE**
+
+---
+
+## 4. Finanz-Impact
+
+### 4.1 Lizenzkosten
+|| Kostenart || Produkt || Metrik || Menge || Einmalig (Y0) || Wiederkehrend (Y1+) || Laufzeit || Kündigung || Bemerkung ||
+| Applikationslizenz | | | | CHF | CHF/Jahr | | | |
+| Datenbanklizenz | | | | CHF | CHF/Jahr | | | |
+| Middleware | | | | CHF | CHF/Jahr | | | |
+| Monitoring | | | | CHF | CHF/Jahr | | | |
+| Backup | | | | CHF | CHF/Jahr | | | |
+| Security-Tools | | | | CHF | CHF/Jahr | | | |
+| **Subtotal** | | | | **CHF 0** | **CHF 0/Jahr** | | | |
+
+### 4.2 Wartung & Support
+|| Kostenart || Anbieter || SLA || Einmalig (Y0) || Wiederkehrend (Y1+) || Bemerkung ||
+| Herstellersupport L2/L3 | | 24/7 | CHF | CHF/Jahr | |
+| Infra-Support | | | CHF | CHF/Jahr | |
+| DB-Support | | | CHF | CHF/Jahr | |
+| Middleware-Support | | | CHF | CHF/Jahr | |
+| Externe AMS | | | CHF | CHF/Jahr | |
+| **Subtotal** | | | **CHF 0** | **CHF 0/Jahr** | |
+
+### 4.3 Dritt-Kosten
+|| Kostenart || Anbieter || Modell || Einmalig (Y0) || Wiederkehrend (Y1+) || Bemerkung ||
+| IDE-Lizenzen | | Pro User/Jahr | CHF | CHF/Jahr | |
+| CI/CD-Tools | | Pro User/Jahr | CHF | CHF/Jahr | |
+| Cloud-Ressourcen | | Verbrauch/Reserviert | CHF | CHF/Monat | |
+| SaaS-Dienste | | Pro User/Monat | CHF | CHF/Monat | |
+| Zertifikate | | Pro Cert/Jahr | CHF | CHF/Jahr | |
+| **Subtotal** | | | **CHF 0** | **CHF 0/Jahr** | |
+
+### 4.4 Personalkosten Betrieb (Year 1+)
+|| Rolle || Kat. || Intern FTE || Extern FTE || Intern PT/Jahr || Extern PT/Jahr || Satz Int. || Satz Ext. || Kosten Int. || Kosten Ext. ||
+| System Admin | Betrieb | | | | | 180 | 220 | CHF | CHF |
+| DB Admin | Betrieb | | | | | 180 | 220 | CHF | CHF |
+| App Support 2nd/3rd | Betrieb | | | | | 180 | 220 | CHF | CHF |
+| Monitoring | Betrieb | | | | | 180 | 220 | CHF | CHF |
+| Backup | Betrieb | | | | | 180 | 220 | CHF | CHF |
+| Change/Release | Betrieb | | | | | 180 | 220 | CHF | CHF |
+| Patch/Vuln Mgmt | Sicherheit | | | | | 180 | 220 | CHF | CHF |
+| Sec Audits/Pen-Test | Sicherheit | | | | | 180 | 220 | CHF | CHF |
+| IAM | Sicherheit | | | | | 180 | 220 | CHF | CHF |
+| DSG/Compliance/ISDS | Sicherheit | | | | | 180 | 220 | CHF | CHF |
+| Vendor Mgmt | Governance | | | | | 180 | 220 | CHF | CHF |
+| SAM | Governance | | | | | 180 | 220 | CHF | CHF |
+| Capacity/Perf | Governance | | | | | 180 | 220 | CHF | CHF |
+| Doku/Wissen | Governance | | | | | 180 | 220 | CHF | CHF |
+| FinOps | Governance | | | | | 180 | 220 | CHF | CHF |
+| **Total Betrieb** | | **0.0** | **0.0** | | | | | **CHF 0** | **CHF 0** |
+
+### 4.5 Projektaufwand Übernahme (Year 0, einmalig)
+|| Phase || Arbeitspaket || Intern PT || Extern PT || Satz Int. || Satz Ext. || Kosten Int. || Kosten Ext. || Verantwortlich || Status ||
+| Aufnahme | Ist-Analyse (Workshops, Doku) | | | 180 | 220 | CHF | CHF | | ☐ |
+| Aufnahme | Gap-Analyse vs. SSV/ISDS/BSI | | | 180 | 220 | CHF | CHF | | ☐ |
+| Aufnahme | Risiko- & Abhängigkeitsanalyse | | | 180 | 220 | CHF | CHF | | ☐ |
+| Sicherheit | ISDS-Klassifizierung & DPIA | | | 180 | 220 | CHF | CHF | | ☐ |
+| Sicherheit | Penetrationstest (extern) | | | 180 | 220 | CHF | CHF | | ☐ |
+| Sicherheit | BSI/ISO 27001 Gap-Assessment | | | 180 | 220 | CHF | CHF | | ☐ |
+| Technik | Infra-Setup (Cloud/On-Prem) | | | 180 | 220 | CHF | CHF | | ☐ |
+| Technik | App-Installation & Konfig | | | 180 | 220 | CHF | CHF | | ☐ |
+| Technik | Schnittstellen-Integration & Tests | | | 180 | 220 | CHF | CHF | | ☐ |
+| Technik | Datenmigration / Initial-Load | | | 180 | 220 | CHF | CHF | | ☐ |
+| Doku | Runbooks erstellen/aktualisieren | | | 180 | 220 | CHF | CHF | | ☐ |
+| Doku | Betriebshandbuch (Architektur) | | | 180 | 220 | CHF | CHF | | ☐ |
+| Doku | Notfallhandbuch / BCP | | | 180 | 220 | CHF | CHF | | ☐ |
+| Doku | SOPs für alle Prozesse | | | 180 | 220 | CHF | CHF | | ☐ |
+| SSV-Buffer | Härtung CIS/STIG | | | 180 | 220 | CHF | CHF | | ☐ |
+| SSV-Buffer | Monitoring/Alerting SSV-Standard | | | 180 | 220 | CHF | CHF | | ☐ |
+| SSV-Buffer | Backup-Strategie & Restore (Bund) | | | 180 | 220 | CHF | CHF | | ☐ |
+| SSV-Buffer | Change-Mgmt-Prozess etablieren | | | 180 | 220 | CHF | CHF | | ☐ |
+| SSV-Buffer | Buffer unvorhergesehen (20-30%) | | | 180 | 220 | CHF | CHF | | ☐ |
+| KT | Knowledge Transfer Sessions | | | 180 | 220 | CHF | CHF | | ☐ |
+| KT | Team-Schulungen | | | 180 | 220 | CHF | CHF | | ☐ |
+| KT | Shadowing-Phase | | | 180 | 220 | CHF | CHF | | ☐ |
+| Go-Live | Go-Live-Vorbereitung & Checklisten | | | 180 | 220 | CHF | CHF | | ☐ |
+| Go-Live | Hypercare (2-4 Wochen) | | | 180 | 220 | CHF | CHF | | ☐ |
+| Go-Live | Lessons Learned & Abschlussbericht | | | 180 | 220 | CHF | CHF | | ☐ |
+| **TOTAL YEAR 0** | | **0** | **0** | | | **CHF 0** | **CHF 0** | | |
+
+---
+
+## 5. Business Case – Zusammenfassung
+
+|| Kennzahl || Wert || Bemerkung ||
+| Total FTE-Bedarf (Betrieb) | 0.0 FTE | Int: 0.0 | Ext: 0.0 |
+| Total Personalkosten/Jahr | CHF 0 | |
+| Total Lizenz & Wartung/Jahr | CHF 0 | |
+| Total Dritt-Kosten/Jahr | CHF 0 | |
+| **Total Betriebsbudget/Jahr (Y1+)** | **CHF 0** | |
+| **Projektinvestition Year 0** | **CHF 0** | |
+| Break-Even (vs. Status Quo) | [Jahre] | |
+| ROI (5 Jahre) | [%] | |
+| NPV (5 Jahre) | [CHF] | |
+
+---
+
+## 6. Entscheidungs-Workflow
+
+|| Schritt || Rolle || Name || Datum || Entscheidung || Kommentar ||
+| 1. Techn. Vorprüfung | Senior Ops Engineer | | | ☐ Geprüft | |
+| 2. Sicherheit (ISDS, DPIA) | InfoSec/DSB | | | ☐ Freigegeben / ☐ Auflagen | |
+| 3. Finanziell | Controlling | | | ☐ Budgetiert / ☐ Abgelehnt | |
+| 4. Ressourcen (FTE) | Team-Lead | | | ☐ Verfügbar / ☐ Nicht verfügbar | |
+| 5. **Endentscheid** | **Leiter Betrieb** | | | ☐ **Genehmigt** / ☐ **Abgelehnt** | |
+| 6. Übergabe Linienbetrieb | Ops Manager | | | ☐ Übernommen am: | |
+
+---
+
+## 7. Anhänge & Links
+
+|| Dokument || Link / Pfad || Version || Datum ||
+| JIRA-Request | [Link] | | |
+| Architekturdiagramm | [Link] | | |
+| ISDS-Klassifizierung | [Link] | | |
+| DPIA | [Link] | | |
+| Vertrag/SLA | [Link] | | |
+| Betriebshandbuch (Alt) | [Link] | | |
+| Pen-Test Report | [Link] | | |
+| Lizenzübersicht | [Link] | | |
+| Kostenberechnung (Excel) | [Link] | | |
+
+---
+
+## 8. Changelog
+
+|| Version || Datum || Autor || Änderung ||
+| 1.0 | //Datum// | [Name] | Erste Erstellung |
+| 1.1 | | | |
+
+---
+
+> *Template v1.0 | Basierend auf SSV, ISDS, BSI, DSG, FinV | Für Confluence-Template „Betriebsübernahme – Detail“*`;
+
+    // DOM Wiring
+    const rawInput = document.getElementById('raw-input');
+    const previewOutput = document.getElementById('preview-output');
+    const inputStats = document.getElementById('input-stats');
+    const btnCopy = document.getElementById('btn-copy');
+    const btnLoadTemplate = document.getElementById('btn-load-template');
+    const toast = document.getElementById('toast');
+
+    function updateView() {
+      const text = rawInput.value;
+      inputStats.textContent = `${text.length} Zeichen`;
+      const html = SecureDocConverter.convert(text);
+      previewOutput.innerHTML = html;
+    }
+
+    rawInput.addEventListener('input', updateView);
+
+    btnLoadTemplate.addEventListener('click', () => {
+      rawInput.value = TEMPLATE_TEXT;
+      updateView();
+    });
+
+    // Rich-Text Copy via Clipboard API
+    btnCopy.addEventListener('click', async () => {
+      const htmlContent = previewOutput.innerHTML;
+      const plainTextContent = previewOutput.innerText;
+
+      if (!htmlContent.trim()) return;
+
+      try {
+        const blobHtml = new Blob([htmlContent], { type: 'text/html' });
+        const blobText = new Blob([plainTextContent], { type: 'text/plain' });
+        
+        const clipboardItem = new ClipboardItem({
+          'text/html': blobHtml,
+          'text/plain': blobText
+        });
+
+        await navigator.clipboard.write([clipboardItem]);
+        
+        toast.style.display = 'block';
+        setTimeout(() => {
+          toast.style.display = 'none';
+        }, 2500);
+      } catch (err) {
+        console.error('Clipboard-API fehlgeschlagen:', err);
+        // Fallback über Selection Range falls Permissions fehlen
+        const range = document.createRange();
+        range.selectNodeContents(previewOutput);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        document.execCommand('copy');
+        sel.removeAllRanges();
+        alert('Rich-Text in Zwischenablage kopiert (Fallback).');
+      }
+    });
+
+    // Initialer Load
+    rawInput.value = TEMPLATE_TEXT;
+    updateView();
+  </script>
+</body>
+</html>
