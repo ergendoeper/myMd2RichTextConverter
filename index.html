@@ -310,17 +310,22 @@
         const lines = rawText.split(/\r?\n/);
         let html = [];
         let inTable = false;
-        let inList = false;
+        const listIndents = [];
         let inQuote = false;
 
         const closeBlocks = () => {
           if (inTable) { html.push('</tbody></table>'); inTable = false; }
-          if (inList) { html.push('</ul>'); inList = false; }
+          while (listIndents.length) {
+            if (listIndents[listIndents.length - 1].itemOpen) html.push('</li>');
+            html.push('</ul>');
+            listIndents.pop();
+          }
           if (inQuote) { html.push('</blockquote>'); inQuote = false; }
         };
 
         for (let i = 0; i < lines.length; i++) {
-          let line = lines[i].trim();
+          const rawLine = lines[i];
+          let line = rawLine.trim();
 
           // Leere Zeile
           if (!line) {
@@ -347,7 +352,7 @@
 
           // Blockquote (>)
           if (line.startsWith('>')) {
-            if (inTable || inList) closeBlocks();
+            if (inTable || listIndents.length) closeBlocks();
             if (!inQuote) {
               html.push('<blockquote>');
               inQuote = true;
@@ -361,29 +366,45 @@
           }
 
           // Listen / Checklisten
-          const listMatch = line.match(/^-\s+(\[\s*\]|[x])?\s*(.*)$/i);
+          const listMatch = rawLine.match(/^([ \t]*)-\s+(\[\s*\]|[x])?\s*(.*)$/i);
           if (listMatch) {
             if (inTable || inQuote) closeBlocks();
-            if (!inList) {
+            const indent = listMatch[1].replace(/\t/g, '    ').length;
+            if (!listIndents.length) {
               html.push('<ul>');
-              inList = true;
+              listIndents.push({ indent, itemOpen: false });
+            } else if (indent > listIndents[listIndents.length - 1]) {
+              html.push('<ul>');
+              listIndents.push({ indent, itemOpen: false });
+            } else {
+              while (indent < listIndents[listIndents.length - 1].indent) {
+                if (listIndents[listIndents.length - 1].itemOpen) html.push('</li>');
+                html.push('</ul>');
+                listIndents.pop();
+              }
             }
+            const currentList = listIndents[listIndents.length - 1];
+            if (currentList.itemOpen) html.push('</li>');
             let checkPrefix = '';
-            if (listMatch[1]) {
-              const isChecked = listMatch[1].toLowerCase().includes('x');
+            if (listMatch[2]) {
+              const isChecked = listMatch[2].toLowerCase().includes('x');
               checkPrefix = isChecked ? '☑ ' : '☐ ';
             }
-            const content = this.parseInline(this.escapeHtml(listMatch[2]));
-            html.push(`<li>${checkPrefix}${content}</li>`);
+            const content = this.parseInline(this.escapeHtml(listMatch[3]));
+            html.push(`<li>${checkPrefix}${content}`);
+            currentList.itemOpen = true;
             continue;
-          } else if (inList) {
-            html.push('</ul>');
-            inList = false;
+          } else if (listIndents.length) {
+            while (listIndents.length) {
+              if (listIndents[listIndents.length - 1].itemOpen) html.push('</li>');
+              html.push('</ul>');
+              listIndents.pop();
+            }
           }
 
           // Tabellen: Unterstützt Jira-Markup (|| Header || und | Zelle |)
           if (line.startsWith('|')) {
-            if (inQuote || inList) closeBlocks();
+            if (inQuote || listIndents.length) closeBlocks();
 
             const isHeaderRow = line.startsWith('||');
             if (!inTable) {
