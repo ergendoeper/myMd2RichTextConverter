@@ -373,7 +373,7 @@
             if (!listIndents.length) {
               html.push('<ul>');
               listIndents.push({ indent, itemOpen: false });
-            } else if (indent > listIndents[listIndents.length - 1]) {
+            } else if (indent > listIndents[listIndents.length - 1].indent) {
               html.push('<ul>');
               listIndents.push({ indent, itemOpen: false });
             } else {
