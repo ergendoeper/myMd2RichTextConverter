@@ -366,7 +366,7 @@
           }
 
           // Listen / Checklisten
-          const listMatch = rawLine.match(/^([ \t]*)-\s+(\[\s*\]|[x])?\s*(.*)$/i);
+          const listMatch = rawLine.match(/^([ \t]*)-\s+(\[\s*\]|\[x\])?\s*(.*)$/i);
           if (listMatch) {
             if (inTable || inQuote) closeBlocks();
             const indent = listMatch[1].replace(/\t/g, '    ').length;
