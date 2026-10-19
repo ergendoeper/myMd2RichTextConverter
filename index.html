@@ -377,7 +377,7 @@
               html.push('<ul>');
               listIndents.push({ indent, itemOpen: false });
             } else {
-              while (indent < listIndents[listIndents.length - 1].indent) {
+              while (listIndents.length > 1 && indent < listIndents[listIndents.length - 1].indent) {
                 if (listIndents[listIndents.length - 1].itemOpen) html.push('</li>');
                 html.push('</ul>');
                 listIndents.pop();
