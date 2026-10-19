@@ -192,6 +192,23 @@
       margin-bottom: 0.75rem;
     }
 
+    .preview-container ol {
+      margin-left: 1.5rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .preview-container pre {
+      overflow-x: auto;
+      padding: 0.75rem;
+      margin-bottom: 0.75rem;
+      background: #f1f5f9;
+      border-radius: 4px;
+    }
+
+    .preview-container code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+
     .preview-container li {
       margin-bottom: 0.25rem;
     }
@@ -258,7 +275,7 @@
     /**
      * Sichere Parsing-Engine:
      * Unterstützt Confluence Jira-Tabellensyntax (|| Header || und | Cell |),
-     * Links ([Text|URL] und [URL]), Task-Listen, Blockquotes und Headers.
+     * Links, Listen, Codeblöcke, Tabellen, Blockquotes und Headers.
      */
     class SecureDocConverter {
       // 1. Sicheres Escapen aller HTML-Entities zur Unterbindung von Injections
@@ -282,27 +299,35 @@
 
       // 3. Inline-Formatierungen parsen
       static parseInline(text) {
-        // Links: [Label|URL] oder [Label]
-        text = text.replace(/\[([^\Vert{}\]]+)\|([^\]]+)\]/g, (match, label, url) => {
-          const safeUrl = this.sanitizeUrl(url);
-          return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${this.escapeHtml(label)}</a>`;
-        });
-        text = text.replace(/\[([^\]]+)\]/g, (match, content) => {
-          // Check ob es sich um eine URL handelt
-          if (/^https?:\/\//i.test(content)) {
-            const safeUrl = this.sanitizeUrl(content);
-            return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeUrl}</a>`;
-          }
-          return `[${this.escapeHtml(content)}]`;
-        });
+        const tokens = [];
+        const protect = html => {
+          const token = `\u0000${tokens.length}\u0000`;
+          tokens.push(html);
+          return token;
+        };
+        const safeLink = (label, url) =>
+          `<a href="${this.sanitizeUrl(url)}" target="_blank" rel="noopener noreferrer">${this.escapeHtml(label)}</a>`;
 
-        // Bold
-        text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-        // Italic (Markdown und Jira-Syntax //text//)
-        text = text.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-        text = text.replace(/\/\/([^/]+)\/\//g, '<em>$1</em>');
+        text = text.replace(/(`+)(.+?)\1/g, (match, ticks, code) =>
+          protect(`<code>${this.escapeHtml(code)}</code>`));
+        text = text.replace(/!\[([^\]]*)\]\((https?:\/\/[^\s)]+)(?:\s+"([^"]*)")?\)/gi, (match, alt, url, title) => {
+          const titleAttribute = title ? ` title="${this.escapeHtml(title)}"` : '';
+          return protect(`<img src="${this.sanitizeUrl(url)}" alt="${this.escapeHtml(alt)}"${titleAttribute}>`);
+        });
+        text = text.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (match, label, url) => protect(safeLink(label, url)));
+        text = text.replace(/\[([^\]|]+)\|([^\]]+)\]/g, (match, label, url) => protect(safeLink(label, url)));
+        text = text.replace(/\[([^\]]+)\]/g, (match, content) =>
+          /^https?:\/\//i.test(content) ? protect(safeLink(content, content)) : match);
 
-        return text;
+        text = this.escapeHtml(text)
+          .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+          .replace(/__(.+?)__/g, '<strong>$1</strong>')
+          .replace(/~~(.+?)~~/g, '<del>$1</del>')
+          .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+          .replace(/_([^_]+)_/g, '<em>$1</em>')
+          .replace(/\/\/([^/]+)\/\//g, '<em>$1</em>');
+
+        return text.replace(/\u0000(\d+)\u0000/g, (match, index) => tokens[index]);
       }
 
       // 4. Haupt-Parser
@@ -312,13 +337,15 @@
         let inTable = false;
         const listIndents = [];
         let inQuote = false;
+        let codeFence = null;
+        let codeLines = [];
 
         const closeBlocks = () => {
           if (inTable) { html.push('</tbody></table>'); inTable = false; }
           while (listIndents.length) {
-            if (listIndents[listIndents.length - 1].itemOpen) html.push('</li>');
-            html.push('</ul>');
-            listIndents.pop();
+            const list = listIndents.pop();
+            if (list.itemOpen) html.push('</li>');
+            html.push(`</${list.tag}>`);
           }
           if (inQuote) { html.push('</blockquote>'); inQuote = false; }
         };
@@ -327,6 +354,23 @@
           const rawLine = lines[i];
           let line = rawLine.trim();
 
+          const fenceMatch = line.match(/^(```+|~~~+)/);
+          if (codeFence) {
+            if (fenceMatch && fenceMatch[1][0] === codeFence[0]) {
+              html.push(`<pre><code>${this.escapeHtml(codeLines.join('\n'))}</code></pre>`);
+              codeFence = null;
+              codeLines = [];
+            } else {
+              codeLines.push(rawLine);
+            }
+            continue;
+          }
+          if (fenceMatch) {
+            closeBlocks();
+            codeFence = fenceMatch[1];
+            continue;
+          }
+
           // Leere Zeile
           if (!line) {
             closeBlocks();
@@ -334,7 +378,7 @@
           }
 
           // Trennlinie
-          if (/^---$\vert{}^\*\*\*$/.test(line)) {
+          if (/^(---+|\*\*\*+|___+)$/.test(line)) {
             closeBlocks();
             html.push('<hr>');
             continue;
@@ -345,7 +389,7 @@
           if (headingMatch) {
             closeBlocks();
             const level = headingMatch[1].length;
-            const content = this.parseInline(this.escapeHtml(headingMatch[2]));
+            const content = this.parseInline(headingMatch[2]);
             html.push(`<h${level}>${content}</h${level}>`);
             continue;
           }
@@ -358,7 +402,7 @@
               inQuote = true;
             }
             const cleanLine = line.replace(/^>\s?/, '');
-            html.push(`<p>${this.parseInline(this.escapeHtml(cleanLine))}</p>`);
+            html.push(`<p>${this.parseInline(cleanLine)}</p>`);
             continue;
           } else if (inQuote) {
             html.push('</blockquote>');
@@ -366,39 +410,47 @@
           }
 
           // Listen / Checklisten
-          const listMatch = rawLine.match(/^([ \t]*)-\s+(\[\s*\]|\[x\])?\s*(.*)$/i);
+          const listMatch = rawLine.match(/^([ \t]*)([-+*]|\d+[.)])\s+(\[\s*\]|\[x\])?\s*(.*)$/i);
           if (listMatch) {
             if (inTable || inQuote) closeBlocks();
             const indent = listMatch[1].replace(/\t/g, '    ').length;
+            const tag = /^\d/.test(listMatch[2]) ? 'ol' : 'ul';
             if (!listIndents.length) {
-              html.push('<ul>');
-              listIndents.push({ indent, itemOpen: false });
+              html.push(`<${tag}>`);
+              listIndents.push({ indent, itemOpen: false, tag });
             } else if (indent > listIndents[listIndents.length - 1].indent) {
-              html.push('<ul>');
-              listIndents.push({ indent, itemOpen: false });
+              html.push(`<${tag}>`);
+              listIndents.push({ indent, itemOpen: false, tag });
             } else {
               while (listIndents.length > 1 && indent < listIndents[listIndents.length - 1].indent) {
-                if (listIndents[listIndents.length - 1].itemOpen) html.push('</li>');
-                html.push('</ul>');
-                listIndents.pop();
+                const list = listIndents.pop();
+                if (list.itemOpen) html.push('</li>');
+                html.push(`</${list.tag}>`);
+              }
+              if (listIndents[listIndents.length - 1].tag !== tag) {
+                const list = listIndents.pop();
+                if (list.itemOpen) html.push('</li>');
+                html.push(`</${list.tag}>`);
+                html.push(`<${tag}>`);
+                listIndents.push({ indent, itemOpen: false, tag });
               }
             }
             const currentList = listIndents[listIndents.length - 1];
             if (currentList.itemOpen) html.push('</li>');
             let checkPrefix = '';
-            if (listMatch[2]) {
-              const isChecked = listMatch[2].toLowerCase().includes('x');
+            if (listMatch[3]) {
+              const isChecked = listMatch[3].toLowerCase().includes('x');
               checkPrefix = isChecked ? '☑ ' : '☐ ';
             }
-            const content = this.parseInline(this.escapeHtml(listMatch[3]));
+            const content = this.parseInline(listMatch[4]);
             html.push(`<li>${checkPrefix}${content}`);
             currentList.itemOpen = true;
             continue;
           } else if (listIndents.length) {
             while (listIndents.length) {
-              if (listIndents[listIndents.length - 1].itemOpen) html.push('</li>');
-              html.push('</ul>');
-              listIndents.pop();
+              const list = listIndents.pop();
+              if (list.itemOpen) html.push('</li>');
+              html.push(`</${list.tag}>`);
             }
           }
 
@@ -427,7 +479,7 @@
 
             html.push('<tr>');
             cells.forEach(cell => {
-              const parsed = this.parseInline(this.escapeHtml(cell));
+              const parsed = this.parseInline(cell);
               if (isHeaderRow) {
                 html.push(`<th>${parsed}</th>`);
               } else {
@@ -442,10 +494,11 @@
           }
 
           // Standard Paragraphen
-          const textContent = this.parseInline(this.escapeHtml(line));
+          const textContent = this.parseInline(line);
           html.push(`<p>${textContent}</p>`);
         }
 
+        if (codeFence) html.push(`<pre><code>${this.escapeHtml(codeLines.join('\n'))}</code></pre>`);
         closeBlocks();
         return html.join('\n');
       }
