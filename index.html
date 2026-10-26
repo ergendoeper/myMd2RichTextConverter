@@ -310,6 +310,7 @@
 
         text = text.replace(/(`+)(.+?)\1/g, (match, ticks, code) =>
           protect(`<code>${this.escapeHtml(code)}</code>`));
+        text = text.replace(/<br\s*\/?>/gi, () => protect('<br>'));
         text = text.replace(/!\[([^\]]*)\]\((https?:\/\/[^\s)]+)(?:\s+"([^"]*)")?\)/gi, (match, alt, url, title) => {
           const titleAttribute = title ? ` title="${this.escapeHtml(title)}"` : '';
           return protect(`<img src="${this.sanitizeUrl(url)}" alt="${this.escapeHtml(alt)}"${titleAttribute}>`);
@@ -335,13 +336,35 @@
         const lines = rawText.split(/\r?\n/);
         let html = [];
         let inTable = false;
+        let tableRow = null;
+        let tableColumnCount = 0;
         const listIndents = [];
         let inQuote = false;
         let codeFence = null;
         let codeLines = [];
 
+        const flushTableRow = () => {
+          if (!tableRow) return;
+          html.push('<tr>');
+          tableRow.cells.forEach(cell => {
+            const parsed = this.parseInline(cell);
+            if (tableRow.titleRow) {
+              html.push(`<th><strong>${parsed}</strong></th>`);
+            } else {
+              html.push(`<td>${parsed}</td>`);
+            }
+          });
+          html.push('</tr>');
+          tableRow = null;
+        };
+
         const closeBlocks = () => {
-          if (inTable) { html.push('</tbody></table>'); inTable = false; }
+          if (inTable) {
+            flushTableRow();
+            html.push('</tbody></table>');
+            inTable = false;
+            tableColumnCount = 0;
+          }
           while (listIndents.length) {
             const list = listIndents.pop();
             if (list.itemOpen) html.push('</li>');
@@ -369,6 +392,26 @@
             closeBlocks();
             codeFence = fenceMatch[1];
             continue;
+          }
+
+          if (inTable && !line.startsWith('|')) {
+            if (!line) continue;
+            if (tableRow && /^<br\s*\/?>/i.test(line)) {
+              const continuationCells = line.split('|').map(cell => cell.trim());
+              if (line.endsWith('|')) continuationCells.pop();
+              if (continuationCells.length > 1 &&
+                tableRow.cells.length + continuationCells.length - 1 === tableColumnCount) {
+                tableRow.cells[tableRow.cells.length - 1] += continuationCells[0];
+                tableRow.cells.push(...continuationCells.slice(1));
+              } else {
+                tableRow.cells[tableRow.cells.length - 1] += line;
+              }
+              continue;
+            }
+            flushTableRow();
+            html.push('</tbody></table>');
+            inTable = false;
+            tableColumnCount = 0;
           }
 
           // Leere Zeile
@@ -476,24 +519,29 @@
 
             // Markdown-Separator-Zeilen wie |--|--| nicht ausgeben
             if (isSeparatorCells(cells)) {
+              flushTableRow();
               continue;
             }
+
+            if (tableRow && tableRow.cells.length < tableColumnCount && !cells[0].startsWith('**')) {
+              if (tableRow.cells.length === 1) {
+                tableRow.cells.push(...cells);
+              } else {
+                tableRow.cells[tableRow.cells.length - 1] += `<br>${cells[0]}`;
+                tableRow.cells.push(...cells.slice(1));
+              }
+              continue;
+            }
+
+            flushTableRow();
+            if (!tableColumnCount) tableColumnCount = cells.length;
 
             // Zeile oberhalb einer Separator-Zeile ist der Titel (fett)
             const nextLine = (lines[i + 1] || '').trim();
             const titleRow = isHeaderRow || (nextLine.startsWith('|') &&
               isSeparatorCells(splitCells(nextLine, nextLine.startsWith('||') ? '||' : '|')));
 
-            html.push('<tr>');
-            cells.forEach(cell => {
-              const parsed = this.parseInline(cell);
-              if (titleRow) {
-                html.push(`<th><strong>${parsed}</strong></th>`);
-              } else {
-                html.push(`<td>${parsed}</td>`);
-              }
-            });
-            html.push('</tr>');
+            tableRow = { cells, titleRow };
             continue;
           } else if (inTable) {
             html.push('</tbody></table>');
